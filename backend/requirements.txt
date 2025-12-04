@@ -3,21 +3,24 @@ uvicorn[standard]==0.27.0
 
 # Database
 sqlalchemy>=2.0.36
-aiomysql>=0.2.0
+aiosqlite>=0.19.0
 alembic==1.13.1
 
 # Security
 cryptography>=41.0.0
 
-# Face Recognition (Windows secure versions)
+# Face Recognition (GPU)
 insightface==0.7.3
-onnxruntime-gpu==1.16.3    # GPU support for faster inference
+onnxruntime-gpu==1.16.3    # GPU support - CUDA 11.8/12.x kerak
 opencv-python>=4.9.0
 numpy>=1.24.0,<2.0
 pillow>=10.2.0
 
-# Faiss GPU (GPU acceleration uchun)
-faiss-gpu==1.7.4  # GPU support for faster vector search
+# FAISS
+# Windows GPU: conda install -c conda-forge faiss-gpu
+# Windows CPU fallback: pip install faiss-cpu
+# Linux GPU: pip install faiss-gpu
+faiss-cpu>=1.7.4
 
 # Utils
 python-multipart==0.0.6
