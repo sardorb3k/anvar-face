@@ -1,14 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import StaticPool
 from app.core.config import settings
 
 # Create async engine
-# SQLite uchun pool_size va max_overflow o'zgartirildi
+# aiosqlite uchun StaticPool ishlatiladi (NullPool pool_size qo'llab-quvvatlamaydi)
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=True,
-    pool_size=1,  # SQLite uchun 1 connection yetarli
-    max_overflow=0,
+    echo=False,
+    poolclass=StaticPool,
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
 )
 
