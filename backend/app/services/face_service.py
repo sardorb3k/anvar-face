@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import insightface
 from insightface.app import FaceAnalysis
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import logging
 import onnxruntime
 import os
@@ -218,8 +218,8 @@ class FaceRecognitionService:
         
         # First check if GPU is available
         gpu_available = self._check_gpu_availability()
-        
-            if not gpu_available:
+
+        if not gpu_available:
             if sys.platform == 'win32':
                 error_msg = (
                     "\n" + "="*70 + "\n"
@@ -418,37 +418,99 @@ class FaceRecognitionService:
     
     def extract_embedding(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
-        Extract face embedding from an image.
-        
+        Extract face embedding from an image (single face - for student registration).
+
         Args:
             image: Input image as numpy array
-            
+
         Returns:
             512-dimensional embedding vector or None if no face detected
         """
         try:
             faces = self.detect_faces(image)
-            
+
             if not faces:
                 logger.warning("No face detected in image")
                 return None
-            
+
             if len(faces) > 1:
                 logger.warning(f"Multiple faces detected ({len(faces)}). Using the largest face.")
                 # Sort by bounding box area and take the largest
                 faces = sorted(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]), reverse=True)
-            
+
             # Get embedding from the first (or largest) face
             embedding = faces[0].embedding
-            
+
             # Normalize embedding
             embedding = embedding / np.linalg.norm(embedding)
-            
+
             return embedding
-            
+
         except Exception as e:
             logger.error(f"Embedding extraction failed: {e}")
             return None
+
+    def extract_all_embeddings(self, image: np.ndarray) -> List[Tuple[np.ndarray, dict]]:
+        """
+        Extract embeddings from ALL faces in an image (for multi-face attendance).
+
+        Args:
+            image: Input image as numpy array
+
+        Returns:
+            List of tuples (embedding, face_info) for each detected face
+            face_info contains: bbox, det_score, face_size
+        """
+        try:
+            faces = self.detect_faces(image)
+
+            if not faces:
+                return []
+
+            results = []
+            min_face_size = settings.MIN_FACE_SIZE
+            max_faces = settings.MAX_FACES_PER_FRAME
+
+            # Filter and sort faces by size (largest first)
+            valid_faces = []
+            for face in faces:
+                face_width = face.bbox[2] - face.bbox[0]
+                face_height = face.bbox[3] - face.bbox[1]
+                face_size = min(face_width, face_height)
+
+                # Skip too small faces
+                if face_size < min_face_size:
+                    continue
+
+                # Skip low confidence detections
+                if hasattr(face, 'det_score') and face.det_score < 0.5:
+                    continue
+
+                valid_faces.append((face, face_size))
+
+            # Sort by size and limit
+            valid_faces.sort(key=lambda x: x[1], reverse=True)
+            valid_faces = valid_faces[:max_faces]
+
+            for face, face_size in valid_faces:
+                embedding = face.embedding
+                # Normalize embedding
+                embedding = embedding / np.linalg.norm(embedding)
+
+                face_info = {
+                    'bbox': face.bbox.tolist(),
+                    'det_score': float(face.det_score) if hasattr(face, 'det_score') else 1.0,
+                    'face_size': face_size
+                }
+
+                results.append((embedding, face_info))
+
+            logger.info(f"Extracted {len(results)} face embeddings from frame")
+            return results
+
+        except Exception as e:
+            logger.error(f"Multi-face embedding extraction failed: {e}")
+            return []
     
     def extract_embeddings_batch(self, images: List[np.ndarray], batch_size: int = None) -> List[Optional[np.ndarray]]:
         """

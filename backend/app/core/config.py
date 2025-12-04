@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     GPU_DEVICE_ID: int = 0  # GPU device ID (0 for first GPU)
     GPU_BATCH_SIZE: int = 8  # Batch size for GPU processing (larger = better GPU utilization)
     GPU_MEMORY_LIMIT_GB: int = 2  # GPU memory limit in GB (0 = unlimited)
+
+    # Multi-face Recognition Settings (Production)
+    MAX_FACES_PER_FRAME: int = 20  # Bir kadrda maksimal yuz soni
+    RECOGNITION_INTERVAL_MS: int = 500  # Yuz aniqlash oralig'i (millisekund)
+    COOLDOWN_SECONDS: int = 10  # Bir xil talaba uchun cooldown (soniya)
+    MIN_FACE_SIZE: int = 80  # Minimal yuz o'lchami (piksel)
+    FRAME_SKIP: int = 3  # Har nechta kadrda 1 marta aniqlash
     
     # API
     API_HOST: str = "0.0.0.0"
