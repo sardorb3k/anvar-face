@@ -1,0 +1,31 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Database
+sqlalchemy>=2.0.36
+aiomysql>=0.2.0
+alembic==1.13.1
+
+# Security
+cryptography>=41.0.0
+
+# Face Recognition (Windows secure versions)
+insightface==0.7.3
+onnxruntime-gpu==1.16.3    # GPU support for faster inference
+opencv-python>=4.9.0
+numpy>=1.24.0,<2.0
+pillow>=10.2.0
+
+# Faiss GPU (GPU acceleration uchun)
+faiss-gpu==1.7.4  # GPU support for faster vector search
+
+# Utils
+python-multipart==0.0.6
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# Tests
+pytest>=7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+websockets>=12.0
