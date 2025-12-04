@@ -1,0 +1,115 @@
+# =============================================================================
+# Docker Compose - Face Recognition System
+# Windows Docker Desktop + GPU (WSL2)
+# =============================================================================
+#
+# ISHGA TUSHIRISH:
+#   docker-compose up --build
+#
+# GPU TEKSHIRISH:
+#   docker-compose exec backend python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Backend API (FastAPI + CUDA GPU)
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-recognition-api
+    restart: unless-stopped
+
+    # ========== GPU Configuration ==========
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # ========== Environment ==========
+    environment:
+      # Database
+      - DATABASE_URL=sqlite+aiosqlite:///./data/face_attendance.db
+      - SQLITE_DB_PATH=./data/face_attendance.db
+
+      # FAISS
+      - FAISS_INDEX_PATH=./data/faiss_index/student_faces.index
+      - FAISS_ID_MAP_PATH=./data/faiss_index/id_map.pkl
+
+      # Images
+      - IMAGES_BASE_PATH=./data/images
+
+      # Face Recognition
+      - CONFIDENCE_THRESHOLD=0.6
+      - EMBEDDING_DIMENSION=512
+      - INSIGHTFACE_MODEL=buffalo_l
+
+      # GPU Settings
+      - REQUIRE_GPU=true
+      - GPU_DEVICE_ID=0
+      - GPU_BATCH_SIZE=8
+      - GPU_MEMORY_LIMIT_GB=4
+
+      # Multi-face Recognition
+      - MAX_FACES_PER_FRAME=20
+      - RECOGNITION_INTERVAL_MS=500
+      - COOLDOWN_SECONDS=10
+      - MIN_FACE_SIZE=80
+      - FRAME_SKIP=3
+
+      # API
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+
+      # CORS (frontend URL)
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:3001","http://127.0.0.1:3000"]
+
+      # NVIDIA
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+    # ========== Ports ==========
+    ports:
+      - "8000:8000"
+
+    # ========== Volumes ==========
+    volumes:
+      # Persistent data
+      - face-data:/app/data
+      # InsightFace models (katta, cache qilish kerak)
+      - face-models:/app/.insightface
+
+    # ========== Networks ==========
+    networks:
+      - face-network
+
+    # ========== Health Check ==========
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  face-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  face-data:
+    name: face-recognition-data
+  face-models:
+    name: face-recognition-models

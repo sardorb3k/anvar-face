@@ -1,0 +1,58 @@
+# =============================================================================
+# Docker Compose - Faqat Backend (GPU bilan)
+# Tez ishga tushirish uchun
+# =============================================================================
+#
+# Ishga tushirish:
+#   docker-compose -f docker-compose.gpu.yml up --build
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-recognition-gpu
+    restart: unless-stopped
+
+    # NVIDIA GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    environment:
+      # GPU majburiy
+      - REQUIRE_GPU=true
+      - GPU_DEVICE_ID=0
+      - GPU_MEMORY_LIMIT_GB=4
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+
+      # Face Recognition
+      - CONFIDENCE_THRESHOLD=0.6
+      - MAX_FACES_PER_FRAME=20
+      - RECOGNITION_INTERVAL_MS=500
+      - COOLDOWN_SECONDS=10
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./data:/app/data
+      - face-db:/app/face_attendance.db
+      - face-faiss:/app/faiss_index
+      - face-images:/app/images
+      - insightface-models:/root/.insightface
+
+volumes:
+  face-db:
+  face-faiss:
+  face-images:
+  insightface-models:
