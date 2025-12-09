@@ -1,0 +1,11 @@
+prefix=/home/aniko/aaa/django/Face/anvar-face/backend/.conda
+exec_prefix=/home/aniko/aaa/django/Face/anvar-face/backend/.conda
+libdir=/home/aniko/aaa/django/Face/anvar-face/backend/.conda/lib
+includedir=/home/aniko/aaa/django/Face/anvar-face/backend/.conda/include
+
+Name: uuid
+Description: Universally unique id library
+Version: 2.32.1
+Requires:
+Cflags: -I${includedir}/uuid
+Libs: -L${libdir} -luuid

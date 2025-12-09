@@ -56,6 +56,18 @@ export default function RootLayout({
                     >
                       Dashboard
                     </Link>
+                    <Link
+                      href="/rooms"
+                      className="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                    >
+                      Xonalar
+                    </Link>
+                    <Link
+                      href="/monitoring"
+                      className="border-transparent text-blue-600 hover:border-blue-500 hover:text-blue-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
+                    >
+                      Monitoring
+                    </Link>
                   </div>
                 </div>
               </div>

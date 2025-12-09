@@ -4,8 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.controllers import students, attendance, rtsp, websocket
-from app.models import Student, StudentImage, Attendance
+from app.controllers import students, attendance, rtsp, websocket, rooms, room_websocket
+from app.models import Student, StudentImage, Attendance, Room, Camera, RoomPresence
 import os
 import asyncio
 
@@ -33,10 +33,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# Configure CORS (WebSocket uchun ham ishlaydi)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],  # WebSocket uchun barcha origin'larni qabul qilish
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,6 +51,8 @@ app.include_router(students.router, prefix="/api/students", tags=["students"])
 app.include_router(attendance.router, prefix="/api/attendance", tags=["attendance"])
 app.include_router(rtsp.router, prefix="/api/rtsp", tags=["rtsp"])
 app.include_router(websocket.router, tags=["websocket"])
+app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
+app.include_router(room_websocket.router, tags=["room-websocket"])
 
 
 @app.get("/")

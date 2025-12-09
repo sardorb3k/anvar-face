@@ -1,24 +1,33 @@
 # =============================================================================
-# Docker Compose - Faqat Backend (GPU bilan)
-# Tez ishga tushirish uchun
+# Docker Compose - Face Recognition Backend (GPU - CUDA 12 + cuDNN 9)
+# RTX 3060 va boshqa zamonaviy GPU lar uchun
 # =============================================================================
 #
 # Ishga tushirish:
 #   docker-compose -f docker-compose.gpu.yml up --build
 #
+# Fon rejimida:
+#   docker-compose -f docker-compose.gpu.yml up -d --build
+#
+# Loglarni ko'rish:
+#   docker-compose -f docker-compose.gpu.yml logs -f
+#
+# To'xtatish:
+#   docker-compose -f docker-compose.gpu.yml down
+#
 # =============================================================================
-
-version: '3.8'
 
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    image: face-recognition-gpu:latest
     container_name: face-recognition-gpu
     restart: unless-stopped
 
-    # NVIDIA GPU
+    # NVIDIA GPU Runtime
+    runtime: nvidia
     deploy:
       resources:
         reservations:
@@ -28,31 +37,37 @@ services:
               capabilities: [gpu]
 
     environment:
-      # GPU majburiy
-      - REQUIRE_GPU=true
-      - GPU_DEVICE_ID=0
-      - GPU_MEMORY_LIMIT_GB=4
+      # GPU sozlamalari
       - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - CUDA_VISIBLE_DEVICES=0
 
-      # Face Recognition
+      # Face Recognition sozlamalari
       - CONFIDENCE_THRESHOLD=0.6
       - MAX_FACES_PER_FRAME=20
       - RECOGNITION_INTERVAL_MS=500
       - COOLDOWN_SECONDS=10
 
+      # App sozlamalari
+      - LOG_LEVEL=INFO
+
     ports:
       - "8000:8000"
 
     volumes:
+      # Ma'lumotlar uchun persistent volumes
       - ./data:/app/data
-      - face-db:/app/face_attendance.db
-      - face-faiss:/app/faiss_index
-      - face-images:/app/images
+      - ./images:/app/images
+      - ./faiss_index:/app/faiss_index
       - insightface-models:/root/.insightface
 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
 volumes:
-  face-db:
-  face-faiss:
-  face-images:
   insightface-models:
+    name: face-recognition-insightface-models

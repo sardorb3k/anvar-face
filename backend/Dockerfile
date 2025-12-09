@@ -1,10 +1,10 @@
 # =============================================================================
-# Face Recognition Attendance System - Docker + CUDA
-# Windows Docker Desktop + WSL2 uchun optimallashtirilgan
+# Face Recognition Attendance System - Docker + CUDA 12 + cuDNN 9
+# RTX 3060 va boshqa zamonaviy GPU lar uchun optimallashtirilgan
 # =============================================================================
 
-# NVIDIA CUDA base image (CUDA 12.1 + cuDNN 8 + Ubuntu 22.04)
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+# NVIDIA CUDA 12.2 + cuDNN 9 base image
+FROM nvidia/cuda:12.2.2-cudnn9-runtime-ubuntu22.04
 
 # ================================
 # Environment Variables
@@ -18,10 +18,15 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 # CUDA paths
 ENV CUDA_HOME=/usr/local/cuda
 ENV PATH=${CUDA_HOME}/bin:${PATH}
-ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
 
 # InsightFace model cache
 ENV INSIGHTFACE_HOME=/app/.insightface
+
+# Force CUDA usage
+ENV CUDA_VISIBLE_DEVICES=0
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 WORKDIR /app
 
@@ -29,7 +34,7 @@ WORKDIR /app
 # System Dependencies
 # ================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Python 3.10 (Ubuntu 22.04 default, stable)
+    # Python 3.10
     python3 \
     python3-dev \
     python3-pip \
@@ -69,6 +74,11 @@ RUN pip3 install --upgrade pip setuptools wheel
 # ================================
 COPY requirements.docker.txt .
 RUN pip3 install --no-cache-dir -r requirements.docker.txt
+
+# ================================
+# Verify CUDA installation
+# ================================
+RUN python3 -c "import onnxruntime as ort; providers = ort.get_available_providers(); print('Available providers:', providers); assert 'CUDAExecutionProvider' in providers, 'CUDA not available!'"
 
 # ================================
 # Application Code

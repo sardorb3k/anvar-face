@@ -125,51 +125,82 @@ class RTSPStreamService:
     
     def _stream_loop(self):
         """Background thread loop for reading frames."""
-        while self.is_running and self.is_connected:
-            try:
-                if not self.capture or not self.capture.isOpened():
-                    logger.error("Capture not available")
-                    break
-                
-                ret, frame = self.capture.read()
-                
-                if not ret or frame is None:
-                    logger.warning("Failed to read frame, attempting reconnection...")
-                    # Try to reconnect
-                    if self.rtsp_url:
-                        self.capture.release()
+        reconnect_attempts = 0
+        max_reconnect_attempts = 5
+
+        try:
+            while self.is_running and self.is_connected:
+                try:
+                    if not self.capture or not self.capture.isOpened():
+                        logger.error("Capture not available")
+                        break
+
+                    ret, frame = self.capture.read()
+
+                    if not ret or frame is None:
+                        reconnect_attempts += 1
+                        logger.warning(
+                            f"Failed to read frame, attempt {reconnect_attempts}/{max_reconnect_attempts}"
+                        )
+
+                        if reconnect_attempts >= max_reconnect_attempts:
+                            logger.error("Max reconnect attempts reached")
+                            break
+
+                        # Try to reconnect - safely release first
+                        if self.capture:
+                            try:
+                                self.capture.release()
+                            except:
+                                pass
                         time.sleep(1)
-                        self.capture = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    continue
-                
-                # Update frame
-                with self.lock:
-                    self.last_frame = frame.copy()
-                    self.frame_count += 1
-                
-                # Calculate FPS
-                current_time = time.time()
-                if current_time - self.last_fps_time >= 1.0:
-                    self.fps = self.frame_count
-                    self.frame_count = 0
-                    self.last_fps_time = current_time
-                
-                # Call callback if provided
-                if self.frame_callback:
-                    try:
-                        self.frame_callback(frame, datetime.now())
-                    except Exception as e:
-                        logger.error(f"Error in frame callback: {e}")
-                
-                # Small delay to prevent CPU overload
-                time.sleep(0.01)  # ~100 FPS max
-                
-            except Exception as e:
-                logger.error(f"Error in stream loop: {e}")
-                time.sleep(0.1)
-        
-        logger.info("Stream loop ended")
+
+                        if self.rtsp_url:
+                            self.capture = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+                            self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        continue
+
+                    reconnect_attempts = 0
+
+                    # Update frame - don't copy for internal storage
+                    with self.lock:
+                        self.last_frame = frame  # No copy for internal storage
+                        self.frame_count += 1
+
+                    # Calculate FPS
+                    current_time = time.time()
+                    if current_time - self.last_fps_time >= 1.0:
+                        self.fps = self.frame_count
+                        self.frame_count = 0
+                        self.last_fps_time = current_time
+
+                    # Call callback if provided
+                    if self.frame_callback:
+                        try:
+                            self.frame_callback(frame, datetime.now())
+                        except Exception as e:
+                            logger.error(f"Error in frame callback: {e}")
+
+                    # PERFORMANCE FIX: Reduced from 0.01 to 0.02 (~50 FPS max instead of 100)
+                    time.sleep(0.02)
+
+                except Exception as e:
+                    logger.error(f"Error in stream loop: {e}")
+                    time.sleep(0.1)
+
+        finally:
+            # CRITICAL: Always release capture when loop ends
+            if self.capture:
+                try:
+                    self.capture.release()
+                    logger.info("Capture released in finally block")
+                except Exception as e:
+                    logger.error(f"Error releasing capture in finally: {e}")
+                self.capture = None
+
+            self.is_connected = False
+            self.last_frame = None  # Free memory
+            logger.info("Stream loop ended")
     
     def get_frame(self) -> Optional[np.ndarray]:
         """

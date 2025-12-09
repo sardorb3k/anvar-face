@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { rtspAPI, RecognitionResult, RTSPStatus } from '@/lib/api';
-import RTSPPlayer from '@/components/RTSPPlayer';
 import StudentCard from '@/components/StudentCard';
-import AttendanceTable from '@/components/AttendanceTable';
 import { attendanceAPI, AttendanceRecord } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const WS_URL = API_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+
+// Overlay ko'rinish vaqti (soniyalarda)
+const OVERLAY_DISPLAY_TIME = 5000; // 5 soniya
 
 export default function CameraPage() {
   const [rtspUrl, setRtspUrl] = useState<string>('');
@@ -19,9 +20,11 @@ export default function CameraPage() {
   const [lastRecognition, setLastRecognition] = useState<RecognitionResult | null>(null);
   const [recognitionHistory, setRecognitionHistory] = useState<RecognitionResult[]>([]);
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord[]>([]);
-  
+  const [showOverlay, setShowOverlay] = useState<boolean>(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const streamImgRef = useRef<HTMLImageElement>(null);
+  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch today's attendance
   const fetchTodayAttendance = async () => {
@@ -36,10 +39,16 @@ export default function CameraPage() {
   useEffect(() => {
     fetchTodayAttendance();
     checkStatus();
-    
+
     // Check status periodically
     const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Cleanup overlay timeout
+      if (overlayTimeoutRef.current) {
+        clearTimeout(overlayTimeoutRef.current);
+      }
+    };
   }, []);
 
   // WebSocket connection for real-time updates
@@ -93,12 +102,65 @@ export default function CameraPage() {
           const message = JSON.parse(event.data);
           
           if (message.type === 'recognition') {
-            setLastRecognition(message);
-            setRecognitionHistory(prev => [message, ...prev.slice(0, 9)]); // Keep last 10
-            
-            // Refresh attendance if successful
-            if (message.status === 'success') {
-              fetchTodayAttendance();
+            // Backend sends 'recognized' array with multiple students
+            if (message.recognized && message.recognized.length > 0) {
+              // Get the first recognized student for overlay display
+              const firstStudent = message.recognized[0];
+
+              // Transform to expected format for overlay
+              const recognitionData: RecognitionResult = {
+                type: 'recognition',
+                status: firstStudent.status || 'success',
+                student: {
+                  id: firstStudent.id,
+                  student_id: firstStudent.student_id,
+                  first_name: firstStudent.first_name,
+                  last_name: firstStudent.last_name,
+                  group_name: firstStudent.group_name,
+                },
+                confidence: firstStudent.confidence,
+                check_in_time: firstStudent.check_in_time,
+                attendance_id: firstStudent.attendance_id,
+                timestamp: message.timestamp,
+              };
+
+              setLastRecognition(recognitionData);
+
+              // Add all recognized students to history
+              message.recognized.forEach((student: any) => {
+                const studentRecognition: RecognitionResult = {
+                  type: 'recognition',
+                  status: student.status || 'success',
+                  student: {
+                    id: student.id,
+                    student_id: student.student_id,
+                    first_name: student.first_name,
+                    last_name: student.last_name,
+                    group_name: student.group_name,
+                  },
+                  confidence: student.confidence,
+                  check_in_time: student.check_in_time,
+                  timestamp: message.timestamp,
+                };
+                setRecognitionHistory(prev => [studentRecognition, ...prev.slice(0, 9)]);
+              });
+
+              // Show overlay
+              setShowOverlay(true);
+              if (overlayTimeoutRef.current) {
+                clearTimeout(overlayTimeoutRef.current);
+              }
+              overlayTimeoutRef.current = setTimeout(() => {
+                setShowOverlay(false);
+              }, OVERLAY_DISPLAY_TIME);
+
+              // Refresh attendance if any student has success status
+              const hasNewAttendance = message.recognized.some(
+                (s: any) => s.status === 'success'
+              );
+              if (hasNewAttendance) {
+                fetchTodayAttendance();
+              }
             }
           } else if (message.type === 'status') {
             setStatus(message);
@@ -278,12 +340,69 @@ export default function CameraPage() {
                   className="w-full h-auto max-h-[600px] object-contain"
                   style={{ display: 'block' }}
                 />
+                {/* Live indicator */}
                 <div className="absolute top-4 right-4">
                   <div className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium flex items-center">
                     <div className="w-2 h-2 bg-white rounded-full mr-2 animate-pulse"></div>
                     Live
                   </div>
                 </div>
+
+                {/* So'nggi tanilgan student - kamera ustida overlay */}
+                {showOverlay && lastRecognition && lastRecognition.student && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 animate-fade-in-up">
+                    <div className={`flex items-center justify-between ${
+                      lastRecognition.status === 'success'
+                        ? 'text-green-400'
+                        : lastRecognition.status === 'already_attended'
+                        ? 'text-yellow-400'
+                        : 'text-white'
+                    }`}>
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
+                          lastRecognition.status === 'success'
+                            ? 'bg-green-500 text-white'
+                            : lastRecognition.status === 'already_attended'
+                            ? 'bg-yellow-500 text-white'
+                            : 'bg-gray-500 text-white'
+                        }`}>
+                          {lastRecognition.student.first_name.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="text-xl font-bold text-white">
+                            {lastRecognition.student.first_name} {lastRecognition.student.last_name}
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            {lastRecognition.student.student_id}
+                            {lastRecognition.student.group_name && ` • ${lastRecognition.student.group_name}`}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-2xl font-bold ${
+                          (lastRecognition.confidence || 0) >= 0.7
+                            ? 'text-green-400'
+                            : (lastRecognition.confidence || 0) >= 0.5
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                        }`}>
+                          {((lastRecognition.confidence || 0) * 100).toFixed(0)}%
+                        </div>
+                        <div className={`text-sm font-medium ${
+                          lastRecognition.status === 'success'
+                            ? 'text-green-400'
+                            : lastRecognition.status === 'already_attended'
+                            ? 'text-yellow-400'
+                            : 'text-gray-400'
+                        }`}>
+                          {lastRecognition.status === 'success' && '✓ Davomat qabul qilindi'}
+                          {lastRecognition.status === 'already_attended' && '⚠ Allaqachon qayd etilgan'}
+                          {lastRecognition.status === 'no_match' && '✗ Tanilmadi'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

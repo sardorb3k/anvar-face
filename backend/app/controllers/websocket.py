@@ -44,6 +44,13 @@ class ConnectionManager:
 
         # Last recognition time for interval control
         self.last_recognition_time: float = 0
+
+        # PERFORMANCE FIX: Periodic cleanup tracking
+        self._last_dict_cleanup = time.time()
+        self._dict_cleanup_interval = 60  # Cleanup every 60 seconds
+
+        # PERFORMANCE FIX: Max pending tasks limit for backpressure
+        self._max_pending_tasks = 50
     
     async def connect(self, websocket: WebSocket):
         """Accept WebSocket connection."""
@@ -264,11 +271,28 @@ class ConnectionManager:
         def frame_callback(frame: np.ndarray, timestamp: datetime):
             """Callback for each frame from RTSP stream (with frame skip)."""
             try:
+                # PERFORMANCE FIX: Backpressure - skip if too many pending tasks
+                try:
+                    pending_tasks = len([t for t in asyncio.all_tasks(loop) if not t.done()])
+                    if pending_tasks > self._max_pending_tasks:
+                        # Skip this frame entirely to reduce load
+                        return
+                except RuntimeError:
+                    # Loop might be closed, skip
+                    pass
+
+                # PERFORMANCE FIX: Periodic dictionary cleanup
+                current_time = time.time()
+                if current_time - self._last_dict_cleanup > self._dict_cleanup_interval:
+                    self._cleanup_cooldown()
+                    self._last_dict_cleanup = current_time
+
                 # Increment frame counter
                 self.frame_counter += 1
 
-                # Always send frames to clients for smooth video
-                asyncio.run_coroutine_threadsafe(self._send_frame_to_all(frame), loop)
+                # Only send frames if there are active connections
+                if self.active_connections:
+                    asyncio.run_coroutine_threadsafe(self._send_frame_to_all(frame), loop)
 
                 # Frame skip: only process every N-th frame
                 if self.frame_counter % settings.FRAME_SKIP != 0:

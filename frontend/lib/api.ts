@@ -195,5 +195,204 @@ export const rtspAPI = {
   },
 };
 
+// ==================== Room Types ====================
+
+export interface Room {
+  id: number;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  camera_count: number;
+}
+
+export interface RoomDetail extends Room {
+  cameras: Camera[];
+}
+
+export interface RoomCreate {
+  name: string;
+}
+
+export interface RoomUpdate {
+  name?: string;
+  is_active?: boolean;
+}
+
+export interface Camera {
+  id: number;
+  room_id: number;
+  name: string;
+  rtsp_url: string;
+  is_active: boolean;
+  created_at: string;
+  status: 'connected' | 'streaming' | 'disconnected';
+}
+
+export interface CameraCreate {
+  name: string;
+  rtsp_url: string;
+}
+
+export interface CameraUpdate {
+  name?: string;
+  rtsp_url?: string;
+  is_active?: boolean;
+}
+
+export interface CameraStatus {
+  camera_id: number;
+  room_id: number;
+  connected: boolean;
+  running: boolean;
+  rtsp_url: string;
+  fps: number;
+}
+
+export interface OccupantInfo {
+  student_id: number;
+  student_number: string;
+  first_name: string;
+  last_name: string;
+  group_name?: string;
+  last_seen_at: string;
+  confidence: number;
+  camera_id?: number;
+}
+
+export interface RoomPresence {
+  room_id: number;
+  room_name: string;
+  occupants: OccupantInfo[];
+  total_count: number;
+}
+
+export interface AllRoomsPresence {
+  rooms: RoomPresence[];
+  total_people: number;
+}
+
+export interface StudentLocation {
+  found: boolean;
+  room_id?: number;
+  room_name?: string;
+  last_seen_at?: string;
+  confidence?: number;
+  camera_id?: number;
+}
+
+export interface PresenceStats {
+  total_people_tracked: number;
+  total_rooms: number;
+  occupied_rooms: number;
+  presence_timeout_seconds: number;
+}
+
+export interface CameraControlResponse {
+  success: boolean;
+  message: string;
+  camera_id: number;
+  status?: CameraStatus;
+}
+
+// ==================== Room API ====================
+
+export const roomAPI = {
+  // Room CRUD
+  create: async (data: RoomCreate): Promise<Room> => {
+    const response = await api.post('/api/rooms/', data);
+    return response.data;
+  },
+
+  list: async (includeInactive = false): Promise<Room[]> => {
+    const response = await api.get('/api/rooms/', {
+      params: { include_inactive: includeInactive },
+    });
+    return response.data;
+  },
+
+  get: async (roomId: number): Promise<RoomDetail> => {
+    const response = await api.get(`/api/rooms/${roomId}`);
+    return response.data;
+  },
+
+  update: async (roomId: number, data: RoomUpdate): Promise<Room> => {
+    const response = await api.put(`/api/rooms/${roomId}`, data);
+    return response.data;
+  },
+
+  delete: async (roomId: number): Promise<void> => {
+    await api.delete(`/api/rooms/${roomId}`);
+  },
+
+  // Camera CRUD
+  addCamera: async (roomId: number, data: CameraCreate): Promise<Camera> => {
+    const response = await api.post(`/api/rooms/${roomId}/cameras`, data);
+    return response.data;
+  },
+
+  listCameras: async (roomId: number, includeInactive = false): Promise<Camera[]> => {
+    const response = await api.get(`/api/rooms/${roomId}/cameras`, {
+      params: { include_inactive: includeInactive },
+    });
+    return response.data;
+  },
+
+  updateCamera: async (roomId: number, cameraId: number, data: CameraUpdate): Promise<Camera> => {
+    const response = await api.put(`/api/rooms/${roomId}/cameras/${cameraId}`, data);
+    return response.data;
+  },
+
+  deleteCamera: async (roomId: number, cameraId: number): Promise<void> => {
+    await api.delete(`/api/rooms/${roomId}/cameras/${cameraId}`);
+  },
+
+  // Camera Control
+  startCamera: async (roomId: number, cameraId: number, timeout = 30): Promise<CameraControlResponse> => {
+    const response = await api.post(`/api/rooms/${roomId}/cameras/${cameraId}/start`, { timeout });
+    return response.data;
+  },
+
+  stopCamera: async (roomId: number, cameraId: number): Promise<CameraControlResponse> => {
+    const response = await api.post(`/api/rooms/${roomId}/cameras/${cameraId}/stop`);
+    return response.data;
+  },
+
+  startAllCameras: async (roomId: number, timeout = 30): Promise<{ started: number; failed: number }> => {
+    const response = await api.post(`/api/rooms/${roomId}/start-all`, { timeout });
+    return response.data;
+  },
+
+  stopAllCameras: async (roomId: number): Promise<{ stopped: number }> => {
+    const response = await api.post(`/api/rooms/${roomId}/stop-all`);
+    return response.data;
+  },
+
+  // Presence
+  getRoomPresence: async (roomId: number): Promise<RoomPresence> => {
+    const response = await api.get(`/api/rooms/${roomId}/presence`);
+    return response.data;
+  },
+
+  getAllPresence: async (): Promise<AllRoomsPresence> => {
+    const response = await api.get('/api/rooms/presence/all');
+    return response.data;
+  },
+
+  getStudentLocation: async (studentId: string): Promise<StudentLocation> => {
+    const response = await api.get(`/api/rooms/presence/student/${studentId}`);
+    return response.data;
+  },
+
+  getPresenceStats: async (): Promise<PresenceStats> => {
+    const response = await api.get('/api/rooms/presence/stats');
+    return response.data;
+  },
+};
+
+// WebSocket URL helper
+export const getWsUrl = (): string => {
+  return API_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+};
+
 export default api;
 
