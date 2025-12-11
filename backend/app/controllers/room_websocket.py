@@ -46,6 +46,10 @@ class RoomConnectionManager:
         # Cooldown tracking per room: {room_id: {student_id: timestamp}}
         self.room_cooldowns: Dict[int, Dict[int, float]] = defaultdict(dict)
 
+        # Guest tracking per room: {room_id: {guest_hash: timestamp}}
+        # Guest hash dan bbox koordinatalari asosida yaratiladi
+        self.guest_tracking: Dict[int, Dict[str, float]] = defaultdict(dict)
+
         # Frame counters per camera
         self.frame_counters: Dict[int, int] = defaultdict(int)
 
@@ -136,6 +140,22 @@ class RoomConnectionManager:
         for ws in disconnected:
             self.camera_subscriptions[camera_id].discard(ws)
 
+    async def broadcast_to_camera(self, camera_id: int, message: dict):
+        """Broadcast JSON message to all subscribers of a camera (e.g., face detections)."""
+        if camera_id not in self.camera_subscriptions:
+            return
+        
+        disconnected = []
+        for ws in self.camera_subscriptions[camera_id]:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting JSON to camera {camera_id}: {e}")
+                disconnected.append(ws)
+
+        for ws in disconnected:
+            self.camera_subscriptions[camera_id].discard(ws)
+
     async def broadcast_all_presence(self, message: dict):
         """Broadcast to all presence subscribers (dashboard)."""
         disconnected = []
@@ -180,10 +200,52 @@ class RoomConnectionManager:
             if not self.room_cooldowns[room_id]:
                 del self.room_cooldowns[room_id]
 
+    def _cleanup_guests(self):
+        """Clean up old guest entries (older than timeout)."""
+        cleanup_threshold = time.time() - settings.PRESENCE_TIMEOUT_SECONDS
+        
+        for room_id in list(self.guest_tracking.keys()):
+            guests = self.guest_tracking[room_id]
+            # Remove old entries
+            old_keys = [k for k, v in guests.items() if v < cleanup_threshold]
+            for key in old_keys:
+                del guests[key]
+            
+            # Remove empty room entries
+            if not guests:
+                del self.guest_tracking[room_id]
+
+    def _get_guest_hash(self, bbox: list) -> str:
+        """Create a hash for guest tracking based on approximate bbox location."""
+        # Bbox ni yaxlitlash - bir xil odamni tracking qilish uchun
+        # Bbox: [x1, y1, x2, y2]
+        x_center = int((bbox[0] + bbox[2]) / 2 / 50) * 50  # 50px tolerance
+        y_center = int((bbox[1] + bbox[3]) / 2 / 50) * 50
+        return f"{x_center}_{y_center}"
+
+    def _update_guest_tracking(self, room_id: int, guest_hash: str):
+        """Update guest last seen time."""
+        self.guest_tracking[room_id][guest_hash] = time.time()
+
+    def _get_active_guests_count(self, room_id: int) -> int:
+        """Get count of active guests in room."""
+        if room_id not in self.guest_tracking:
+            return 0
+        
+        cutoff_time = time.time() - settings.PRESENCE_TIMEOUT_SECONDS
+        active_guests = sum(
+            1 for timestamp in self.guest_tracking[room_id].values()
+            if timestamp >= cutoff_time
+        )
+        return active_guests
+
     def _cleanup_all_dicts(self):
         """PERFORMANCE FIX: Clean all tracking dictionaries periodically."""
         # Cleanup cooldowns
         self._cleanup_cooldowns()
+        
+        # Cleanup guests
+        self._cleanup_guests()
 
         # Cleanup frame counters - only keep active cameras
         active_cameras = set(self.rtsp_manager.streams.keys()) if hasattr(self.rtsp_manager, 'streams') else set()
@@ -236,6 +298,7 @@ class RoomConnectionManager:
                 return
 
             recognized_students = []
+            all_faces = []  # Barcha yuzlar (tanilgan va tanilmagan)
 
             async with AsyncSessionLocal() as db:
                 for embedding, face_info in face_results:
@@ -243,13 +306,20 @@ class RoomConnectionManager:
                     match = self.vector_service.search_with_threshold(embedding)
 
                     if match is None:
+                        # Tanilmagan yuz - "Mehmon"
+                        # Track guest for counting
+                        guest_hash = self._get_guest_hash(face_info['bbox'])
+                        self._update_guest_tracking(room_id, guest_hash)
+                        
+                        all_faces.append({
+                            "type": "guest",
+                            "label": "Mehmon",
+                            "bbox": face_info['bbox'],
+                            "confidence": 0.0
+                        })
                         continue
 
                     student_db_id, confidence = match
-
-                    # Check cooldown
-                    if self._is_in_cooldown(room_id, student_db_id):
-                        continue
 
                     # Get student info
                     result = await db.execute(
@@ -258,6 +328,25 @@ class RoomConnectionManager:
                     student = result.scalar_one_or_none()
 
                     if not student:
+                        all_faces.append({
+                            "type": "guest",
+                            "label": "Mehmon",
+                            "bbox": face_info['bbox'],
+                            "confidence": 0.0
+                        })
+                        continue
+
+                    # Tanilgan yuz - ism-familiya bilan
+                    all_faces.append({
+                        "type": "student",
+                        "label": f"{student.first_name} {student.last_name}",
+                        "student_id": student.student_id,
+                        "bbox": face_info['bbox'],
+                        "confidence": confidence
+                    })
+
+                    # Check cooldown for database update
+                    if self._is_in_cooldown(room_id, student_db_id):
                         continue
 
                     # Update presence in database
@@ -294,6 +383,10 @@ class RoomConnectionManager:
                     # Get current room presence
                     presence_list = await self.presence_service.get_room_presence(db, room_id)
 
+                # Get guest count
+                guest_count = self._get_active_guests_count(room_id)
+                total_people = len(presence_list) + guest_count
+
                 presence_message = {
                     "type": "presence_update",
                     "room_id": room_id,
@@ -301,6 +394,8 @@ class RoomConnectionManager:
                     "new_recognitions": recognized_students,
                     "occupants": [p.to_dict() for p in presence_list],
                     "total_count": len(presence_list),
+                    "guest_count": guest_count,
+                    "total_people": total_people,
                     "timestamp": timestamp.isoformat()
                 }
 
@@ -309,6 +404,19 @@ class RoomConnectionManager:
 
                 # Broadcast to all presence subscribers
                 await self.broadcast_all_presence(presence_message)
+
+            # Har doim yuzlarni yuborish (video stream uchun)
+            if all_faces:
+                face_detection_message = {
+                    "type": "face_detection",
+                    "camera_id": camera_id,
+                    "faces": all_faces,
+                    "total_faces": len(all_faces),
+                    "timestamp": timestamp.isoformat()
+                }
+                
+                # Broadcast face detections to camera subscribers
+                await self.broadcast_to_camera(camera_id, face_detection_message)
 
             # Cleanup cooldowns periodically
             if sum(len(c) for c in self.room_cooldowns.values()) > 100:
@@ -437,12 +545,17 @@ class RoomConnectionManager:
                         # Find rooms with changes and broadcast
                         for room_data in new_presence:
                             room_id = room_data["room_id"]
+                            guest_count = self._get_active_guests_count(room_id)
+                            total_people = room_data["total_count"] + guest_count
+                            
                             message = {
                                 "type": "presence_update",
                                 "room_id": room_id,
                                 "room_name": room_data["room_name"],
                                 "occupants": room_data["occupants"],
                                 "total_count": room_data["total_count"],
+                                "guest_count": guest_count,
+                                "total_people": total_people,
                                 "timestamp": datetime.now().isoformat()
                             }
                             await self.broadcast_to_room(room_id, message)
@@ -488,11 +601,23 @@ async def all_rooms_presence(websocket: WebSocket):
         # Send initial presence for all rooms
         async with AsyncSessionLocal() as db:
             all_presence = await room_manager.presence_service.get_all_rooms_presence_with_names(db)
-            total_people = sum(r["total_count"] for r in all_presence)
+            
+            # Add guest counts
+            for room_data in all_presence:
+                room_id = room_data["room_id"]
+                guest_count = room_manager._get_active_guests_count(room_id)
+                room_data["guest_count"] = guest_count
+                room_data["total_people"] = room_data["total_count"] + guest_count
+            
+            total_students = sum(r["total_count"] for r in all_presence)
+            total_guests = sum(r["guest_count"] for r in all_presence)
+            total_people = total_students + total_guests
 
             await websocket.send_json({
                 "type": "initial_all_presence",
                 "rooms": all_presence,
+                "total_students": total_students,
+                "total_guests": total_guests,
                 "total_people": total_people,
                 "timestamp": datetime.now().isoformat()
             })
@@ -549,6 +674,8 @@ async def room_presence_stream(websocket: WebSocket, room_id: int):
                 return
 
             presence_list = await room_manager.presence_service.get_room_presence(db, room_id)
+            guest_count = room_manager._get_active_guests_count(room_id)
+            total_people = len(presence_list) + guest_count
 
             await websocket.send_json({
                 "type": "initial_presence",
@@ -556,6 +683,8 @@ async def room_presence_stream(websocket: WebSocket, room_id: int):
                 "room_name": room.name,
                 "occupants": [p.to_dict() for p in presence_list],
                 "total_count": len(presence_list),
+                "guest_count": guest_count,
+                "total_people": total_people,
                 "timestamp": datetime.now().isoformat()
             })
 
